@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   Calculator,
   CircleDollarSign,
+  FileSpreadsheet,
   Percent,
   Plus,
   RefreshCcw,
@@ -193,6 +194,125 @@ function calculate({
   };
 }
 
+function excelText(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function excelNumber(value) {
+  return Number(value || 0).toFixed(2);
+}
+
+function fileNameForProduct(product) {
+  const cleanName = String(product || "pastry-product")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${cleanName || "pastry-product"}-pricing.xls`;
+}
+
+function renderExcelTable(title, headers, rows) {
+  const headerCells = headers.map((header) => `<th>${excelText(header)}</th>`).join("");
+  const bodyRows = rows
+    .map((row) => `<tr>${row.map((cell) => `<td>${excelText(cell)}</td>`).join("")}</tr>`)
+    .join("");
+  return `
+    <h2>${excelText(title)}</h2>
+    <table>
+      <thead><tr>${headerCells}</tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+  `;
+}
+
+function downloadExcelReport({ product, batchYield, ingredients, variables, settings, totals, costParts, scenarios }) {
+  const summaryRows = [
+    ["Product", product],
+    ["Batch Yield", batchYield],
+    ["Unit Cost", excelNumber(totals.baseUnitCost)],
+    ["Suggested Price", excelNumber(totals.suggestedGross)],
+    ["Expected Profit", excelNumber(totals.profit)],
+    ["Net Margin %", excelNumber(totals.margin * 100)],
+    ["Break-even Price", excelNumber(totals.breakEven)],
+    ["Batch Ingredient Cost", excelNumber(totals.ingredientBatchCost)],
+  ];
+
+  const settingRows = [
+    ["VAT enabled", settings.vatIncluded ? "Yes" : "No"],
+    ["VAT rate %", settings.vatPct],
+    ["Card fee %", settings.cardFeePct],
+    ["Delivery / marketplace fee %", settings.platformPct],
+    ["Wastage buffer %", settings.wastagePct],
+    ["Overhead mode", settings.overheadMode],
+    ["Monthly overheads AED", settings.monthlyOverheads],
+    ["Monthly production pcs", settings.monthlyProduction],
+    ["Custom overhead per unit AED", settings.customOverhead],
+    ["Margin mode", settings.marginMode],
+    ["Target %", settings.targetMarginPct],
+    ["Round price to AED", settings.priceIncrement],
+  ];
+
+  const ingredientRows = ingredients.map((row) => [
+    row.item,
+    row.qty,
+    row.unit,
+    excelNumber(row.unitCost),
+    excelNumber(numberValue(row.qty) * numberValue(row.unitCost)),
+  ]);
+
+  const variableRows = variables.map((row) => [
+    row.item,
+    excelNumber(row.amount),
+  ]);
+
+  const costRows = costParts.map(([label, amount]) => [label, excelNumber(amount)]);
+  const scenarioRows = scenarios.map((scenario) => [
+    scenario.label,
+    excelNumber(scenario.grossPrice),
+    excelNumber(scenario.profit),
+    excelNumber(scenario.margin * 100),
+  ]);
+
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="UTF-8" />
+        <style>
+          body { font-family: Arial, sans-serif; color: #20231f; }
+          h1 { font-size: 22px; }
+          h2 { margin-top: 22px; font-size: 16px; color: #805111; }
+          table { border-collapse: collapse; margin-bottom: 12px; min-width: 560px; }
+          th { background: #e9ede3; font-weight: 700; }
+          th, td { border: 1px solid #cfd6c8; padding: 7px 9px; text-align: left; }
+        </style>
+      </head>
+      <body>
+        <h1>Midnight Flour Pricing - ${excelText(product)}</h1>
+        ${renderExcelTable("Pricing Summary", ["Metric", "Value"], summaryRows)}
+        ${renderExcelTable("Ingredient Costs", ["Ingredient", "Qty", "Unit", "AED / unit", "Total AED"], ingredientRows)}
+        ${renderExcelTable("Direct Variable Costs", ["Cost", "AED / unit"], variableRows)}
+        ${renderExcelTable("Dubai Settings", ["Setting", "Value"], settingRows)}
+        ${renderExcelTable("Cost Breakdown", ["Cost type", "AED / unit"], costRows)}
+        ${renderExcelTable("Price Scenarios", ["Scenario", "Selling price AED", "Profit AED", "Margin %"], scenarioRows)}
+      </body>
+    </html>
+  `;
+
+  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileNameForProduct(product);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function App() {
   const defaultPreset = productPresets[defaultPresetKey];
   const [presetKey, setPresetKey] = useState(defaultPresetKey);
@@ -300,8 +420,15 @@ function App() {
           <button type="button" className="ghost" onClick={resetSample}>
             <RefreshCcw size={16} /> Reset
           </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => downloadExcelReport({ product, batchYield, ingredients, variables, settings, totals, costParts, scenarios })}
+          >
+            <FileSpreadsheet size={16} /> Excel
+          </button>
           <button type="button" className="primary" onClick={() => window.print()}>
-            <ArrowDownToLine size={16} /> Export
+            <ArrowDownToLine size={16} /> Print
           </button>
         </div>
       </header>
